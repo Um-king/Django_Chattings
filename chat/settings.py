@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-33fbkfa4d4wrbetb#45y5efpu@dl_kpk!kxfp7$_*k@svc5vxz
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['3.34.94.140', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -33,6 +33,7 @@ ALLOWED_HOSTS = []
 INSTALLED_APPS = [
     'channels',
     'chatrooms',
+
 
     'django.contrib.admin',
     'django.contrib.auth',
