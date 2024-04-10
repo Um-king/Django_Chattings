@@ -39,6 +39,7 @@
 
         chatSocket.onmessage = function(e) {
             const data = JSON.parse(e.data);
+            // 비디오 신호 처리
             if (data.signal && data.from) {
                 if (!peerConnections[data.from]) {
                     createPeerConnection(data.from);
@@ -62,6 +63,9 @@
                     const candidate = new RTCIceCandidate(signal.candidate);
                     peerConnections[data.from].addIceCandidate(candidate);
                 }
+            // 일반 메시지 처리
+            } else if (data.message) {
+                document.querySelector('#chat-log').value += (data.message + '\n');
             }
         };
 
