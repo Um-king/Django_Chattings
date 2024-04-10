@@ -7,92 +7,135 @@
 <body>
     <textarea id="chat-log" cols="100" rows="20"></textarea><br>
     <input id="chat-message-input" type="text" size="100"><br>
-    <input id="chat-message-submit" type="button" value="Send"><br>
-    <button id="start-button">Start</button>
+    <input id="chat-message-submit" type="button" value="Send">
 
     <div id="video-container">
+        <!-- 사용자 비디오를 위한 컨테이너 -->
         <video id="local-video" autoplay muted></video>
+        <!-- 다른 사용자들의 비디오를 위한 공간; 실제 구현 시 다이나믹하게 추가될 수 있음 -->
     </div>
 
+    {{ room_name|json_script:"room-name" }}
     <script>
-        const roomName = JSON.parse(document.getElementById('room-name').textContent); // 이 줄은 서버 템플릿과 관련되어 있어 실제 데이터 바인딩이 필요합니다.
+        const roomName = JSON.parse(document.getElementById('room-name').textContent);
         const wsStart = window.location.protocol === "https:" ? "wss://" : "ws://";
         const chatSocket = new WebSocket(
-            wsStart + window.location.host + '/ws/chat/' + roomName + '/'
+            wsStart
+            + window.location.host
+            + '/ws/chat/'
+            + roomName
+            + '/'
         );
 
-        const configuration = {'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}]};
-        let localStream = null;
-        let peerConnections = {};
-
-        document.getElementById('start-button').onclick = () => {
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                    .then(stream => {
-                        document.getElementById('local-video').srcObject = stream;
-                        localStream = stream;
-                    }).catch(error => console.error('getUserMedia error:', error));
-            } else {
-                console.error('Your browser does not support getUserMedia API');
-            }
+        const configuration = {
+            'iceServers': [
+                {
+                    'urls': 'stun:stun.l.google.com:19302'
+                }
+            ]
         };
+
+        // WebRTC 연결 설정
+        let localStream = null;
+        let peerConnections = {}; // 모든 피어 연결을 관리하는 객체
+
+        // 비디오 스트림 설정
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                document.getElementById('local-video').srcObject = stream;
+                localStream = stream;
+            }).catch(error => console.error('MediaDevices getUserMedia error:', error));
 
         chatSocket.onmessage = function(e) {
             const data = JSON.parse(e.data);
             if (data.signal && data.from) {
-                if (!peerConnections[data.from]) {
-                    createPeerConnection(data.from);
-                }
-                const signal = data.signal;
-                if (signal.sdp) {
-                    const sdp = new RTCSessionDescription(signal.sdp);
-                    peerConnections[data.from].setRemoteDescription(sdp).then(() => {
-                        if (signal.sdp.type === 'offer') {
-                            peerConnections[data.from].createAnswer().then(answer => {
-                                peerConnections[data.from].setLocalDescription(answer).then(() => {
-                                    chatSocket.send(JSON.stringify({
-                                        'signal': {'sdp': peerConnections[data.from].localDescription},
-                                        'to': data.from
-                                    }));
-                                });
-                            });
-                        }
-                    });
-                } else if (signal.candidate) {
-                    const candidate = new RTCIceCandidate(signal.candidate);
-                    peerConnections[data.from].addIceCandidate(candidate);
-                }
+                handleSignal(data.signal, data.from);
+            } else if (data.message) {
+                document.querySelector('#chat-log').value += (data.message + '\n');
             }
         };
 
-        function createPeerConnection(socketID) {
-            const pc = new RTCPeerConnection(configuration);
+        console.log(window.location.host)
+
+        // 신호 처리 로직
+        function handleSignal(signal, from) {
+            if (signal.type === 'offer') {
+                createPeerConnection(from, true)
+                    .then(() => peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal)))
+                    .then(() => peerConnections[from].createAnswer())
+                    .then(answer => peerConnections[from].setLocalDescription(answer))
+                    .then(() => {
+                        chatSocket.send(JSON.stringify({
+                            'signal': peerConnections[from].localDescription,
+                            'to': from
+                        }));
+                    });
+            } else if (signal.type === 'answer') {
+                const desc = new RTCSessionDescription(signal);
+                peerConnections[from].setRemoteDescription(desc);
+            } else if (signal.candidate) {
+                let candidate = new RTCIceCandidate(signal.candidate);
+                peerConnections[from].addIceCandidate(candidate);
+            }
+        }
+
+        function createPeerConnection(socketID, isOffer) {
+            if (peerConnections[socketID]) {
+                return Promise.resolve();
+            }
+
+            let pc = new RTCPeerConnection(configuration);
             peerConnections[socketID] = pc;
 
-            pc.onicecandidate = event => {
+            pc.onicecandidate = function(event) {
                 if (event.candidate) {
                     chatSocket.send(JSON.stringify({
-                        'signal': {'candidate': event.candidate},
+                        'signal': {
+                            'type': 'candidate',
+                            'candidate': event.candidate
+                        },
                         'to': socketID
                     }));
                 }
             };
 
-            pc.ontrack = event => {
-                const remoteVideo = document.createElement('video');
+            pc.ontrack = function(event) {
+                let remoteVideo = document.createElement('video');
                 remoteVideo.srcObject = event.streams[0];
                 remoteVideo.autoplay = true;
                 document.getElementById('video-container').appendChild(remoteVideo);
             };
 
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            return isOffer ? pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+                chatSocket.send(JSON.stringify({
+                    'signal': pc.localDescription,
+                    'to': socketID
+                }));
+            }) : Promise.resolve();
         }
 
+        chatSocket.onclose = function(e) {
+            console.error('Chat socket closed unexpectedly');
+        };
+    
+        document.querySelector('#chat-message-input').focus();
+        document.querySelector('#chat-message-input').onkeyup = function(e) {
+            if (e.keyCode === 13) {  // enter, return
+                document.querySelector('#chat-message-submit').click();
+            }
+        };
+    
         document.querySelector('#chat-message-submit').onclick = function(e) {
-            const message = document.querySelector('#chat-message-input').value;
-            chatSocket.send(JSON.stringify({'message': message}));
-            document.querySelector('#chat-message-input').value = '';
+            const messageInputDom = document.querySelector('#chat-message-input');
+            const message = messageInputDom.value;
+            chatSocket.send(JSON.stringify({
+                'message': message
+            }));
+            messageInputDom.value = '';
         };
     </script>
+    
 </body>
 </html>
