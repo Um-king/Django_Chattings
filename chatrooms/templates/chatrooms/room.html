@@ -13,7 +13,7 @@
     <div id="video-container">
         <video id="local-video" autoplay muted></video>
     </div>
-
+    {{ room_name|json_script:"room-name" }}
     <script>
         const roomName = JSON.parse(document.getElementById('room-name').textContent); // 이 줄은 서버 템플릿과 관련되어 있어 실제 데이터 바인딩이 필요합니다.
         const wsStart = window.location.protocol === "https:" ? "wss://" : "ws://";
